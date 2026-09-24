@@ -1330,20 +1330,25 @@ const generatePDF = async () => {
   if (!result) return;
 
   try {
-    const base64 = result.pdf.output("datauristring").split(",")[1];
+    const blob = result.pdf.output("blob");
+    const url = URL.createObjectURL(blob);
 
-    await Filesystem.writeFile({
-      path: `PDR Shotcrete/${result.fileName}`,
-      data: base64,
-      directory: Directory.Documents,
-      recursive: true,
-    });
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = result.fileName;
+    link.style.display = "none";
 
-    toast.success("PDF guardado correctamente en Documentos");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    toast.success("PDF generado correctamente");
   } catch (error) {
-    console.error("Error al guardar PDF:", error);
+    console.error("Error al generar PDF:", error);
 
-    toast.error("No se pudo guardar el PDF");
+    toast.error("No se pudo generar el PDF");
   }
 };
 
@@ -1352,43 +1357,61 @@ const sharePDF = async () => {
 
   if (!result) return;
 
-  const { pdf, fileName, date } = result;
-
   try {
-    const base64 = pdf.output("datauristring").split(",")[1];
+    const blob = result.pdf.output("blob");
 
-    // Guardar temporalmente el PDF en Cache para poder compartirlo
-    await Filesystem.writeFile({
-      path: fileName,
-      data: base64,
-      directory: Directory.Cache,
-    });
+    const file = new File(
+      [blob],
+      result.fileName,
+      { type: "application/pdf" }
+    );
 
-    // Obtener la URI nativa del archivo
-    const fileUri = await Filesystem.getUri({
-      path: fileName,
-      directory: Directory.Cache,
-    });
+    // Compartir el PDF directamente desde el iPhone
+    if (
+      typeof navigator.share === "function" &&
+      typeof navigator.canShare === "function" &&
+      navigator.canShare({ files: [file] })
+    ) {
+      await navigator.share({
+        title: "Cálculo volumen de Shotcrete",
+        text: `Cálculo volumen de Shotcrete
 
-    const shareText = `Cálculo volumen de Shotcrete
+Nivel: ${nivel || "—"}
+Labor: ${labor || "—"}
+Fecha: ${result.date}`,
+        files: [file],
+      });
 
-Nivel: ${nivel}
-Labor: ${labor}
-Fecha: ${date}`;
-
-    const canShare = await Share.canShare();
-
-    if (!canShare.value) {
-      toast.error("Este dispositivo no permite compartir archivos");
       return;
     }
 
-    await Share.share({
-      title: "Cálculo volumen de Shotcrete",
-      text: shareText,
-      files: [fileUri.uri],
-      dialogTitle: "Compartir PDF",
-    });
+    // Fallback: compartir texto si el navegador no permite
+    // compartir archivos.
+    if (typeof navigator.share === "function") {
+      await navigator.share({
+        title: "Cálculo volumen de Shotcrete",
+        text: `Cálculo volumen de Shotcrete
+
+Nivel: ${nivel || "—"}
+Labor: ${labor || "—"}
+Fecha: ${result.date}
+
+Perímetro: ${fmt2(shown?.P ?? 0)} m
+Área: ${fmt2(shown?.area ?? 0)} m²`,
+      });
+
+      toast.info("El navegador no permite adjuntar el PDF directamente");
+      return;
+    }
+
+    // Último recurso: abrir el PDF para que el usuario pueda
+    // guardarlo o compartirlo manualmente.
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+
+    toast.info("PDF abierto. Puedes guardarlo o compartirlo.");
   } catch (error) {
     console.error("Error al compartir PDF:", error);
 
